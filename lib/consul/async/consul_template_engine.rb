@@ -11,8 +11,8 @@ module Consul
     # The Engine keeps tracks of all templates, handle hot-reload of files if needed
     # as well as ticking the clock to compute state of templates periodically.
     class ConsulTemplateEngine
-      attr_reader :template_manager, :hot_reload_failure, :template_frequency, :debug_memory, :result, :templates
-      attr_writer :hot_reload_failure, :template_frequency, :debug_memory
+      attr_reader :template_manager, :hot_reload_failure, :template_frequency, :debug_memory, :only_update_on_changes, :result, :templates
+      attr_writer :hot_reload_failure, :template_frequency, :debug_memory, :only_update_on_changes
       def initialize
         @templates = []
         @template_callbacks = []
@@ -21,6 +21,7 @@ module Consul
         @template_frequency = 1
         @periodic_started = false
         @debug_memory = false
+        @only_update_on_changes = false
         @result = 0
         @last_memory_state = build_memory_info
         @start = Time.now
@@ -91,6 +92,7 @@ module Consul
       end
 
       def run(template_manager)
+        last_changes=0
         @template_manager = template_manager
         EventMachine.run do
           template_renders = []
@@ -105,21 +107,35 @@ module Consul
           end
           EventMachine.add_periodic_timer(template_frequency) do
             @periodic_started = true
-            do_run(template_manager, template_renders)
-            if debug_memory
-              GC.start
-              new_memory_state = build_memory_info
-              diff_allocated = new_memory_state[:pages] - @last_memory_state[:pages]
-              diff_num_objects = new_memory_state[:objects] - @last_memory_state[:objects]
-              if diff_allocated != 0 || diff_num_objects.abs > (@last_memory_state[:pages] / 3)
-                timediff = new_memory_state[:time] - @last_memory_state[:time]
-                warn "[MEMORY] #{new_memory_state[:time]} significant RAM Usage detected\n" \
-                            "[MEMORY] #{new_memory_state[:time]} Pages  : #{new_memory_state[:pages]}" \
-                            " (diff #{diff_allocated} aka #{(diff_allocated / timediff).round(0)}/s) \n" \
-                            "[MEMORY] #{new_memory_state[:time]} Objects: #{new_memory_state[:objects]}"\
-                            " (diff #{diff_num_objects} aka #{(diff_num_objects / timediff).round(0)}/s)"
-                @last_memory_state = new_memory_state
-              end
+            if !@only_update_on_changes || last_changes < template_manager.net_info[:changes]
+                ::Consul::Async::Debug.print_debug "Consul changed, rendering templates. last_changes #{last_changes}, current changes #{template_manager.net_info[:changes]}\n" if @only_update_on_changes
+                last_changes = template_manager.net_info[:changes]
+                do_run(template_manager, template_renders)
+                if debug_memory
+                    GC.start
+                    new_memory_state = build_memory_info
+                    diff_allocated = new_memory_state[:pages] - @last_memory_state[:pages]
+                    diff_num_objects = new_memory_state[:objects] - @last_memory_state[:objects]
+                    if diff_allocated != 0 || diff_num_objects.abs > (@last_memory_state[:pages] / 3)
+                        timediff = new_memory_state[:time] - @last_memory_state[:time]
+                        warn "[MEMORY] #{new_memory_state[:time]} significant RAM Usage detected\n" \
+                                    "[MEMORY] #{new_memory_state[:time]} Pages  : #{new_memory_state[:pages]}" \
+                                    " (diff #{diff_allocated} aka #{(diff_allocated / timediff).round(0)}/s) \n" \
+                                    "[MEMORY] #{new_memory_state[:time]} Objects: #{new_memory_state[:objects]}"\
+                                    " (diff #{diff_num_objects} aka #{(diff_num_objects / timediff).round(0)}/s)"
+                        @last_memory_state = new_memory_state
+                    end
+                end
+            else
+                #We run the callbacks here, so any --exec process can be cleaned up
+                begin
+                    @template_callbacks.each do |c|
+                      c.call([true, template_manager, [] ])
+                    end
+                rescue StandardError => e
+                    ::Consul::Async::Debug.puts_error "callback error: #{e.inspect}"
+                    raise e
+                end
             end
           end
         end

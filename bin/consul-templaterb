@@ -220,6 +220,10 @@ optparse = OptionParser.new do |opts|
     consul_engine.debug_memory = true
   end
 
+  opts.on('-C', '--only-on-changes', 'Only update on changes') do
+    consul_engine.only_update_on_changes = true
+  end
+
   opts.on('-T', '--trim-mode=trim_mode', String,
           "ERB Trim mode to use (#{options[:erb][:trim_mode]} by default)") do |trim_mode|
     options[:erb][:trim_mode] = trim_mode
