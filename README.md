@@ -197,6 +197,7 @@ USAGE: consul-templaterb [[options]]
     -t erb_file:[output]:[command]:[params_file],
         --template                   Add a erb template, its output and optional reload command
     -o, --once                       Do not run the process as a daemon
+    -C, --only-on-changes            Only render templates when consul changes
 ```
 
 When launched with file arguments ending with .erb, the executable will assume

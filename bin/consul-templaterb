@@ -220,7 +220,7 @@ optparse = OptionParser.new do |opts|
     consul_engine.debug_memory = true
   end
 
-  opts.on('-C', '--only-on-changes', 'Only update on changes') do
+  opts.on('-C', '--only-on-changes', 'Only render templates when consul changes') do
     consul_engine.only_update_on_changes = true
   end
 
